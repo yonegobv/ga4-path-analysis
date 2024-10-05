@@ -1,0 +1,77 @@
+config {
+    type: "incremental",
+    name: "sequenced_events",
+    description: `page_views and other events extracted from GA4 export data and organized by session ID and sequence number.`,
+    uniqueKey: ["date", "session_id", "seq_num"],
+    bigquery: {
+        partitionBy: "date",
+        updatePartitionFilter: "date >= DATE_SUB(CURRENT_DATE(),INTERVAL 3 day))"
+    }
+}
+
+WITH
+  dates AS ( -- change the start and end date for all queries here
+  SELECT
+    -- change the start_date interval the first time you run the query to backfill
+    -- for example, if you want to backfill 90 days, change it to 90
+    -- chance it back to 2 day before you create an automatic workflow
+    FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 3 day)) AS start_date,
+    FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 1 day)) AS end_date,
+    ),
+    
+  -- get source / medium values by session_id
+  source_mediums_prep AS (
+  SELECT
+    CONCAT(user_pseudo_id,(SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id')) AS session_id,
+    COALESCE(ARRAY_AGG((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'source') IGNORE NULLS
+      ORDER BY event_timestamp)[SAFE_OFFSET(0)],'(direct)') AS session_source,
+    COALESCE(ARRAY_AGG((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'medium') IGNORE NULLS
+      ORDER BY event_timestamp)[SAFE_OFFSET(0)],'(none)') AS session_medium,
+    ARRAY_AGG((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location') IGNORE NULLS
+      ORDER BY event_timestamp)[SAFE_OFFSET(0)] LIKE '%gclid%' AS has_gclid
+  FROM
+    ${ref("events_*")}
+  WHERE  _table_suffix BETWEEN (SELECT start_date FROM dates) AND (SELECT end_date FROM dates)
+  GROUP BY session_id ),
+
+  -- if a gclid is present, assign it to google / cpc
+  source_mediums AS (
+  SELECT
+    session_id,
+    CASE
+      WHEN has_gclid IS TRUE THEN 'google / cpc'
+      ELSE CONCAT(IFNULL(session_source,'(direct)'),' / ',IFNULL(session_medium,'(none)'))
+    END AS session_source_medium,
+  FROM source_mediums_prep ),
+
+  -- get session path sequences and assign each step a sequence number (seq_num)
+  ranked_paths AS (
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS date,
+    CONCAT(user_pseudo_id,(SELECT value.int_value FROM UNNEST(event_params)WHERE key = 'ga_session_id')) AS session_id,
+    event_timestamp,
+    (CASE
+        WHEN event_name = 'page_view' THEN ${ref("extract_path")}(( SELECT value.string_value FROM UNNEST(event_params) WHERE KEY = 'page_location'))
+        ELSE REPLACE(event_name,"_"," ")
+    END) AS page_path,
+    ROW_NUMBER() OVER(PARTITION BY (CONCAT(user_pseudo_id,(SELECT value.int_value FROM UNNEST(event_params)
+          WHERE key = 'ga_session_id')))
+    ORDER BY
+      event_timestamp) AS seq_num
+  FROM
+    ${ref("events_*")} events
+  WHERE
+    _table_suffix BETWEEN (SELECT start_date FROM dates) AND (SELECT end_date FROM dates)
+    -- update the following list if you want to see specific events included in path behavior
+    -- contact_us_submission is included here as an example - the event names have to match
+    -- event names in your GA4 property
+    AND event_name IN ('page_view','contact_us_submission')
+  ORDER BY session_id, event_timestamp )
+
+  -- join sequenced event data and source / medium values
+SELECT
+  source_mediums.session_source_medium,
+  ranked_paths.*
+FROM ranked_paths
+JOIN source_mediums 
+ON ranked_paths.session_id = source_mediums.session_id

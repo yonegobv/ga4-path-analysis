@@ -1,0 +1,5 @@
+defaultProject: twooctobersbigquery
+defaultLocation: US
+defaultDataset: sandbox
+defaultAssertionDataset: dataform_assertions
+dataformCoreVersion: 3.0.0
