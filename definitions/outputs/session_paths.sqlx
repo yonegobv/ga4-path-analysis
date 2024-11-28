@@ -1,0 +1,78 @@
+config {
+  type: "incremental",
+  name: "session_paths",
+  description: `User path data, organized by session_id. Each row has ten steps 
+  - steps are either page views or key events.`,
+  uniqueKey: ["date","session_id"],
+  bigquery: {
+    partitionBy: "date",
+    updatePartitionFilter: "date >= DATE_SUB(CURRENT_DATE(),INTERVAL 3 day))"
+  }
+}
+
+WITH dates AS (
+  SELECT 
+    FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 3 day)) AS start_date,
+    FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 1 day)) AS end_date,
+),
+
+-- add the previous page - this will be used for deduping in the next step
+filtered_paths AS (
+  SELECT 
+    date,
+    session_id,
+    event_timestamp,
+    session_source_medium,
+    page_path,
+    seq_num,
+    LAG(page_path) OVER(PARTITION BY session_id ORDER BY seq_num) as prev_page_path
+  FROM 
+    ${ref("sequenced_events")}
+),
+
+-- remove instances where a user visits the same page more than once sequentially
+deduped_paths AS (
+  SELECT 
+    date,
+    session_id,
+    event_timestamp,
+    session_source_medium,
+    page_path
+  FROM 
+    filtered_paths
+  WHERE 
+    page_path != prev_page_path OR prev_page_path IS NULL
+),
+
+-- convert sequential page views per session into an array - results in one row per session
+paths_array AS (
+  SELECT 
+    MIN(date) as date,
+    session_id,
+    session_source_medium,
+    ARRAY_AGG(page_path ORDER BY event_timestamp ASC) AS path_steps
+  FROM 
+    deduped_paths
+  GROUP BY 
+    session_id, session_source_medium
+)
+
+-- unpack sequential views into individual columns
+SELECT 
+  date,
+  session_id,
+  session_source_medium,
+  path_steps[OFFSET(0)] AS step_1,
+  path_steps[SAFE_OFFSET(1)] AS step_2,
+  path_steps[SAFE_OFFSET(2)] AS step_3,
+  path_steps[SAFE_OFFSET(3)] AS step_4,
+  path_steps[SAFE_OFFSET(4)] AS step_5,
+  path_steps[SAFE_OFFSET(5)] AS step_6,
+  path_steps[SAFE_OFFSET(6)] AS step_7,
+  path_steps[SAFE_OFFSET(7)] AS step_8,
+  path_steps[SAFE_OFFSET(8)] AS step_9,
+  path_steps[SAFE_OFFSET(9)] AS step_10,
+  -- this is to make it possible to search for paths with a given step in Looker Studio
+  ARRAY_TO_STRING(path_steps," ") AS all_steps,
+  ARRAY_LENGTH(path_steps) AS number_of_steps
+FROM paths_array

@@ -1,0 +1,6 @@
+config {
+  type: "declaration",
+  database: constants.SOURCE_DATABASE,
+  schema: constants.SOURCE_DATASET, 
+  name: "events_*"
+}
