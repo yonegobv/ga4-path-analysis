@@ -1,7 +1,5 @@
-<<<<<<< HEAD
 defaultProject: autonomous-star-252113
 defaultLocation: EU
->>>>>>> refs/heads/main
-defaultDataset: dataform
+defaultDataset: dataform_yonego
 defaultAssertionDataset: dataform_assertions
 dataformCoreVersion: 3.0.0
