@@ -1,0 +1,5 @@
+defaultProject: autonomous-star-252113
+defaultLocation: EU
+defaultDataset: dataform
+defaultAssertionDataset: dataform_assertions
+dataformCoreVersion: 3.0.0
