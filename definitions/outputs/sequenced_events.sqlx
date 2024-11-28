@@ -15,7 +15,7 @@ WITH
     -- change the start_date interval the first time you run the query to backfill
     -- for example, if you want to backfill 90 days, change it to 90
     -- chance it back to 2 day before you create an automatic workflow
-    FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 90 day)) AS start_date,
+    FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 2 day)) AS start_date,
     FORMAT_DATE('%Y%m%d',DATE_SUB(CURRENT_DATE(), INTERVAL 1 day)) AS end_date,
     ),
     
